@@ -1,0 +1,191 @@
+// DuplicateColumnDefError
+create table account (
+	account_number int not null,
+	branch_name char(15),
+	account_number int
+);
+
+// DuplicatePrimaryKeyDefError
+create table account (
+	account_number int not null,
+	branch_name char(15),
+	primary key(account_number),
+	primary key(branch_name)
+);
+
+// CharLengthError
+create table account (
+	account_number int not null,
+	branch_name char(-1)
+);
+
+// NonExistingColumnDefError(#colName)
+create table account (
+	account_number int not null,
+	branch_name char(15),
+	primary key(balance)
+);
+
+// CreateTableSuccess(#tableName)
+create table account (
+	account_number int not null,
+	branch_name char(15),
+	primary key(branch_name)
+);
+
+// TableExistenceError
+create table account (
+	account_number int
+);
+
+// ReferenceTypeError
+create table foo (
+	account_number int not null,
+	boo_name int,
+	foreign key(boo_name) references account(branch_name)
+);
+
+// ReferenceTypeError
+create table foo (
+	account_number int not null,
+	boo_name char(13),
+	foreign key(boo_name) references account(branch_name)
+);
+
+// ReferenceNonPrimaryKeyError
+create table foo (
+	account_number int not null,
+	boo_name char(15),
+	foreign key(account_number) references account(account_number)
+);
+
+// ReferenceColumnExistenceError
+create table foo (
+	account_number int not null,
+	boo_name char(15),
+	foreign key(boo_name) references account(balance)
+);
+
+// ReferenceTableExistenceError
+create table foo (
+	account_number int not null,
+	boo_name char(15),
+	foreign key(boo_name) references bank(branch_name)
+);
+
+// SelfReferenceError
+create table foo (
+	account_number int not null,
+	boo_name char(15),
+	foreign key(boo_name) references foo(boo_name)
+);
+
+// ReferenceNonPrimaryKeyError
+create table foo (
+	account_number int not null,
+	boo_name char(15),
+	foreign key(account_number, boo_name) references account(account_number, branch_name)
+);
+
+// CreateTableSuccess(#tableName)
+create table foo (
+	account_number int not null,
+	boo_name char(15),
+	foreign key(boo_name) references account(branch_name)
+);
+
+// NoSuchTable
+drop table bank;
+
+// DropReferencedTableError(#tableName)
+drop table account;
+
+// NoSuchTable
+explain bank;
+describe bank;
+desc bank;
+
+explain foo;
+describe foo;
+desc foo;
+
+explain account;
+describe account;
+desc account;
+
+show tables;
+
+// ReferenceColumnMatchError 
+create table moo (
+    account_number int not null,
+    boo_name char(15),
+    foreign key(boo_name, account_number) references account(branch_name)
+);
+
+// DuplicateColumnListError 
+create table moo (
+    account_number int not null,
+    boo_name char(15),
+    primary key(boo_name, boo_name)
+);
+
+// CreateTableSuccess(#tableName)
+create table mya (
+    ca int,
+    cb int,
+    cc int,
+    primary key(ca, cc)
+);
+
+// ReferenceNonPrimaryKeyError
+create table myb (
+    ba int,
+    bb int,
+    bc int,
+    foreign key(ba) references mya(ca)
+);
+
+// ReferenceNonPrimaryKeyError
+create table myb (
+    ba int,
+    bb int,
+    bc int,
+    foreign key(ba, bc) references mya(ca, cb)
+);
+
+// ReferenceNonPrimaryKeyError
+create table myb (
+    ba int,
+    bb int,
+    bc int,
+    foreign key(ba, bb, bc) references mya(ca, cb, cc)
+);
+
+// CreateTableSuccess(#tableName)
+create table myb (
+    ba int,
+    bb int,
+    bc int,
+    foreign key(ba, bb) references mya(ca, cc)
+);
+
+drop table mya;
+
+drop table myb;
+drop table mya;
+drop table foo;
+
+insert into account values(123, 'fashion');
+insert into account values(12412, 'slice');
+insert into account values(21355, 'asylum');
+insert into account values(2483, 'party');
+insert into account values(028846, 'swipe');
+insert into account values(874613, 'winner');
+insert into account values(85675, 'Perryridge');
+insert into account values(37567, 'digital');
+insert into account values(42348, 'arch');
+insert into account values(3598, 'achieve');
+insert into account values(23457, 'Perryridgasdfasdfadsfae');
+insert into account values(985654, 'sustain');
+insert into account values(78537238, 'Perryridge');
+insert into account values(9735682, 'look');

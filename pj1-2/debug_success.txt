@@ -1,0 +1,34 @@
+create table account (
+	account_number int not null,
+	branch_name char(15),
+	primary key(branch_name)
+);
+
+create table foo (
+	account_number int not null,
+	boo_name char(15),
+	foreign key(boo_name) references account(branch_name)
+);
+
+create table mya (
+    aa int,
+    ab int,
+    ac int,
+    primary key(aa, ac)
+);
+
+create table myb (
+    ba int,
+    bb int,
+    bc int,
+    foreign key(ba, bb) references mya(aa, ac),
+    primary key(bb)
+);
+
+create table myc (
+    ca int,
+    cb int,
+    cc int,
+    foreign key(ca, cc) references mya(aa, ac),
+    foreign key(cb) references myb(bb)
+);
