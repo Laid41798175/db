@@ -3,7 +3,7 @@
 # OH, JIN SU
 # 2018-19857
 
-from lark import Lark, Transformer, v_args, LarkError
+from lark import Lark, Transformer, v_args, LarkError, Token
 import sys
 from berkeleydb import db
 from os import remove
@@ -181,21 +181,23 @@ class Data:
     
     @staticmethod
     def decode_data_to_att_list(utf, att_list):
-        """
-        Use this method when you have to handle/compare the data (i.e. where)
-        """
         string = utf.decode('utf-8')
         this_list = string.split('?')
         my_list = []
         for i in range(len(att_list)):
-            if att_list[i].type == "int":
+            if this_list[i] == "None":
+                my_list.append(None)
+                continue
+
+            if att_list[i].data_type == "int":
                 my_list.append(int(this_list[i]))
-            elif att_list[i].type == "char":
+            elif att_list[i].data_type == "char":
                 my_list.append(this_list[i])
-            elif att_list[i].type == "data":
+            elif att_list[i].data_type == "date":
                 my_list.append(date(this_list[i][0:4], this_list[i][5:7], this_list[8:9]))
         return my_list
 
+    @DeprecationWarning # used in only Pj1-2
     @staticmethod
     def decode_data_to_str_list(utf):
         """
@@ -207,6 +209,15 @@ class Data:
         for element in this_list:
             my_list.append(str(element))
         return my_list
+
+class AmbiguousReferenceError(Exception):
+    pass
+class IncomparableError(Exception):
+    pass
+class TableNotSpecifiedError(Exception):
+    pass
+class ColumnNotExistError(Exception):
+    pass
 
 infoDB = db.DB()
 
@@ -228,6 +239,18 @@ def print_success(string):
 def print_error(string):
     print('DB_2018-19857> ' + string)
 
+def print_header(select_att_str_list):
+    select_att_num = len(select_att_str_list)
+    print('+' + "---------------+" * select_att_num)
+    for select_att_str in select_att_str_list:
+        print(f'|{select_att_str.ljust(15)}', end = '')
+    print('|')
+    print('+' + "---------------+" * select_att_num)
+
+def print_footer(select_att_str_list):
+    select_att_num = len(select_att_str_list)
+    print('+' + "---------------+" * select_att_num)
+
 def encode(string: str) -> bytes:
     return string.encode('utf-8')
 
@@ -242,6 +265,200 @@ def decode_info_value(utf: bytes) -> List[str]:
     string = decode(utf)
     ref_list = Reference.string_to_ref_list(string)
     return ref_list
+
+def get_index_of_column_name(table_name, column_name, att_list):
+    if table_name is not None:
+        # raise TableNotSpecifiedError: SelectTableExistenceError(#tableName) | WhereTableNotSpecified
+        att_table_list = [att_table_name for (att_table_name, att_column_name) in att_list]
+        if table_name not in att_table_list:
+            raise TableNotSpecifiedError
+        
+        # raise ColumnNotExistError: SelectColumnResolveError(#colName) | WhereColumnNotExist
+        for i in range(len(att_list)):
+            (att_table_name, attribute) = att_list[i]
+            if att_table_name == table_name and attribute.column_name == column_name:
+                return i
+        raise ColumnNotExistError
+    else: # table_name is None
+        idx = -1
+        for i in range(len(att_list)):
+            (att_table_name, attribute) = att_list[i]
+            if attribute.column_name == column_name:
+                # raise AmbiguousReferenceError: SelectColumnResolveError(#colName) | WhereAmbiguousReference
+                if idx != -1:
+                    raise AmbiguousReferenceError
+                else:
+                    idx = i
+
+        # raise WhereColumnNotExistError: SelectColumnResolveError(#colName) | WhereColumnNotExist
+        if idx == -1:
+            raise ColumnNotExistError
+        else:
+            return idx
+
+def get_where_clause_value(where_clause, att_list, data) -> bool:
+    boolean_expr = where_clause.children[1]
+    boolean_expr_value = get_boolean_expr_value(boolean_expr, att_list, data)
+    if boolean_expr_value is None:
+        # if final boolean_expr_value is Unknown, return False
+        return False
+    else:
+        return boolean_expr_value
+
+def get_boolean_expr_value(boolean_expr, att_list, data):
+    return_None = False
+    return_True = False
+    for boolean_term in boolean_expr.children:
+        # ignore Token 'OR'
+        if isinstance(boolean_term, Token):
+            continue
+
+        boolean_term_value = get_boolean_term_value(boolean_term, att_list, data)
+        if boolean_term_value is None:
+            return_None = True
+        elif boolean_term_value == True:
+            return_True = True
+        else:
+            pass
+    
+    # short-circuit is not used to get all boolean_term_value to check validity
+    if return_True:
+        return True
+    elif return_None:
+        return None
+    else:
+        return False
+
+def get_boolean_term_value(boolean_term, att_list, data):
+    return_None = False
+    return_True = True
+    for boolean_factor in boolean_term.children:
+        # ignore Token 'AND'
+        if isinstance(boolean_factor, Token):
+            continue
+
+        boolean_factor_value = get_boolean_factor_value(boolean_factor, att_list, data)
+        if boolean_factor_value is None:
+            return_None = True
+        elif boolean_factor_value == False:
+            return_True = False
+        else:
+            pass
+
+    # short-circuit is not used to get all boolean_term_value to check validity
+    if not return_True:
+        return False
+    if return_None:
+        return None
+    else:
+        return True
+
+def get_boolean_factor_value(boolean_factor, att_list, data):
+    boolean_test = boolean_factor.children[1]
+    boolean_test_value = get_boolean_test_value(boolean_test, att_list, data)
+    if boolean_test_value is None:
+        return None
+    
+    if boolean_factor.children[0] is None: # boolean_test        
+        return boolean_test_value
+    else: # NOT boolean_test
+        return not boolean_test_value
+    
+def get_boolean_test_value(boolean_test, att_list, data):
+    if boolean_test.children[0].data == "predicate":
+        predicate = boolean_test.children[0]
+        return get_predicate_value(predicate, att_list, data)
+    elif boolean_test.children[0].data == "parenthesized_boolean_expr":
+        boolean_expr = boolean_test.children[0].children[1]
+        return get_boolean_expr_value(boolean_expr, att_list, data)
+
+def get_predicate_value(predicate, att_list, data):
+    if predicate.children[0].data == "comparison_predicate":
+        comparison_predicate = predicate.children[0]
+        return get_comparison_predicate_value(comparison_predicate, att_list, data)
+    elif predicate.children[0].data == "null_predicate":
+        null_predicate = predicate.children[0]
+        return get_null_predicate_value(null_predicate, att_list, data)
+
+def get_comparison_predicate_value(comparison_predicate, att_list, data):
+    comp_operand1 = get_comp_operand_value(comparison_predicate.children[0], att_list, data)
+    comp_operand2 = get_comp_operand_value(comparison_predicate.children[2], att_list, data)
+
+    if comp_operand1 is None or comp_operand2 is None:
+        # if one of the value is null, return None (Unknown)
+        return None
+
+    if type(comp_operand1) != type(comp_operand2):
+        # raise IncomparableError: WhereIncomparableError
+        raise IncomparableError
+    comp_op = comparison_predicate.children[1].children[0]
+    if comp_op.type == "LESSTHAN":
+        return comp_operand1 < comp_operand2
+    elif comp_op.type == "LESSEQUAL":
+        return comp_operand1 <= comp_operand2
+    elif comp_op.type == "EQUAL":
+        return comp_operand1 == comp_operand2
+    elif comp_op.type == "GREATERTHAN":
+        return comp_operand1 > comp_operand2
+    elif comp_op.type == "GREATEREQUAL":
+        return comp_operand1 >= comp_operand2
+    elif comp_op.type == "NOTEQUAL":
+        return comp_operand1 != comp_operand2
+
+def get_comp_operand_value(comp_operand, att_list, data):
+    if len(comp_operand.children) == 1:
+        # comparable_value
+        comparable_value = comp_operand.children[0]
+        return get_comparable_value_value(comparable_value)
+    else:
+        # [table_name "."] column_name
+        if comp_operand.children[0] is None:
+            table_name = None
+        else:
+            table_name = comp_operand.children[0].children[0].value.lower()
+        column_name = comp_operand.children[1].children[0].value.lower()
+        
+        # this may raise error, but select_query will handle the error
+        idx = get_index_of_column_name(table_name, column_name, att_list)
+        return data[idx]
+
+def get_comparable_value_value(comparable_value):
+    if comparable_value.children[0].type == "INT":
+        return int(comparable_value.children[0].value)
+    elif comparable_value.children[0].type == "STR":
+        # trim first and last character \"
+        return comparable_value.children[0].value[1:-1]
+    elif comparable_value.children[0].type == "DATE":
+        return date(comparable_value.children[0].value)
+    else:
+        return None
+
+def get_null_predicate_value(null_predicate, att_list, data):   
+    if null_predicate.children[0] is None:
+        table_name = None
+    else:
+        table_name = null_predicate.children[0].children[0].value.lower()
+    column_name = null_predicate.children[1].children[0].value.lower()
+
+    null_operation = null_predicate.children[2]
+    idx = get_index_of_column_name(table_name, column_name, att_list)
+
+    if data[idx] is None:
+        # data[idx] = null
+        if null_operation.children[1] is None:
+            # data[idx] is null
+            return True
+        else:
+            # data[idx] is not null
+            return False
+    else:
+        # data[idx] != null
+        if null_operation.children[1] is None:
+            # data[idx] is null
+            return False
+        else:
+            # data[idx] is not null
+            return True
 
 class MyTransformer(Transformer):
     def create_table_query(self, items):
@@ -597,41 +814,226 @@ class MyTransformer(Transformer):
         # do not show values whose key is reserved for internal evaluation
         reserved_key = ["_attribute_list", "_static_count"]
 
-        # assume that select * from table_name, table_name is unique in this case
-        table_name = list(items[2].find_data("table_name"))[0].children[0].value.lower()
-        key = encode(table_name)
+        # find table_name in only table_reference_list
+        table_name_iter = list(items[2].children[0].find_data("table_name"))
+        table_name_list = [table_name.children[0].value.lower() for table_name in table_name_iter]
+        key_name_pair_list = [(encode(table_name), table_name) for table_name in table_name_list]
+
+        db_name_pair_list = []
+        attribute_list = []
 
         # check SelectTableExistenceError(#tableName)
-        if not infoDB.exists(key):
-            print_error(f"Selection has failed: '{table_name}' does not exist")
-            return
+        for (key, table_name) in key_name_pair_list:
+            if not infoDB.exists(key):
+                print_error(f"Selection has failed: '{table_name}' does not exist")
+                return
+            selectDB = db.DB()
+            selectDB.open(f"DB/{table_name}.db", dbtype=db.DB_HASH)
+            db_name_pair_list.append((selectDB, table_name))
         
-        selectDB = db.DB()
-        selectDB.open(f"DB/{table_name}.db", dbtype=db.DB_HASH)
-        attributes = Attribute.decode_att_list(selectDB.get(encode("_attribute_list")))
-        attribute_num = len(attributes)
+        # create attribute_list for select_att_str_list
+        for (selectDB, att_table_name) in db_name_pair_list:
+            attributes = Attribute.decode_att_list(selectDB.get(encode("_attribute_list")))
+            for attribute in attributes:
+                attribute_list.append((att_table_name, attribute))
 
-        print('+' + "---------------+" * attribute_num)
-        for attribute in attributes:
-            print(f'|{attribute.column_name.ljust(15)}', end = '')
-        print('|')
-        print('+' + "---------------+" * attribute_num)
+        data_list = []
 
-        cursor = selectDB.cursor()
-        while x := cursor.next():
-            key = decode(x[0])
+        # create data_list with len(table_name_list)
+        # using one/two/three while loop, data_list consists of data which is concatenated data for each table
+        if len(table_name_list) == 1:
+            selectDB = db_name_pair_list[0][0]
+            attributes = Attribute.decode_att_list(selectDB.get(encode("_attribute_list")))
+            cursor = selectDB.cursor()
+            while x := cursor.next():
+                key = decode(x[0])
+                if key in reserved_key:
+                    continue
+                data_att_list = Data.decode_data_to_att_list(x[1], attributes)
 
-            # continue if x[0] is reserved (e.g. "_attribute_list", "_static_count")
-            if key in reserved_key:
-                continue
+                data_list.append(data_att_list)
+        elif len(table_name_list) == 2:
+            selectDB = db_name_pair_list[0][0]
+            attributes = Attribute.decode_att_list(selectDB.get(encode("_attribute_list")))
+            cursor = selectDB.cursor()
+            while x := cursor.next():
+                key = decode(x[0])
+                if key in reserved_key:
+                    continue
+                data_att_list = Data.decode_data_to_att_list(x[1], attributes)
+                
+                selectDB2 = db_name_pair_list[1][0]
+                attributes2 = Attribute.decode_att_list(selectDB2.get(encode("_attribute_list")))
+                cursor2 = selectDB2.cursor()                
+                while y := cursor2.next():
+                    key2 = decode(y[0])
+                    if key2 in reserved_key:
+                        continue
+                    data_att_list2 = Data.decode_data_to_att_list(y[1], attributes2)
 
-            data_str_list = Data.decode_data_to_str_list(x[1])
-            for data_str in data_str_list:
-                print(f'|{data_str.ljust(15)}', end = '')
-            print('|')
+                    data_list.append(data_att_list + data_att_list2)
+        elif len(table_name_list) == 3:
+            selectDB = db_name_pair_list[0][0]
+            attributes = Attribute.decode_att_list(selectDB.get(encode("_attribute_list")))
+            cursor = selectDB.cursor()
+            while x := cursor.next():
+                key = decode(x[0])
+                if key in reserved_key:
+                    continue                
+                data_att_list = Data.decode_data_to_att_list(x[1], attributes)
 
-        print('+' + "---------------+" * attribute_num)
-        selectDB.close()
+                selectDB2 = db_name_pair_list[1][0]
+                attributes2 = Attribute.decode_att_list(selectDB2.get(encode("_attribute_list")))
+                cursor2 = selectDB2.cursor()
+                while y := cursor2.next():
+                    key2 = decode(y[0])
+                    if key2 in reserved_key:
+                        continue
+                    data_att_list2 = Data.decode_data_to_att_list(y[1], attributes2)
+                    
+                    selectDB3 = db_name_pair_list[2][0]
+                    attributes3 = Attribute.decode_att_list(selectDB3.get(encode("_attribute_list")))
+                    cursor3 = selectDB3.cursor()
+                    while z := cursor3.next():
+                        key3 = decode(z[0])
+                        if key3 in reserved_key:
+                            continue
+                        data_att_list3 = Data.decode_data_to_att_list(z[1], attributes3)
+                        
+                        data_list.append(data_att_list + data_att_list2 + data_att_list3)
+        else:
+            # check SelectTableMaximumError
+            print_error("Selection has failed: exceed maximum table")
+            for (selectDB, table_name) in db_name_pair_list:
+                selectDB.close()
+            return
+
+        # select_att_list will be used in matching the attribute order and print order
+        select_att_str_list : List[str] = []
+        select_att_idx_list : List[int] = []
+        is_asterisk = len(list(items[1].find_data("selected_column"))) == 0
+        if is_asterisk:
+            # if asterisk, select all
+            idx = 0
+            for (att_table_name, attribute) in attribute_list:
+                select_att_str_list.append(f"{attribute.column_name}")
+                select_att_idx_list.append(idx)
+                idx += 1
+        else:
+            # if not, get all idx for select_att_str_list using get_index_of_column_name()
+            select_column_iter = items[1].find_data("selected_column")
+            for select_column in select_column_iter:
+                is_table_include = select_column.children[0] is not None
+                if is_table_include:
+                    # table_name is clarified
+                    table_name = select_column.children[0].children[0].value.lower()
+                    column_name = select_column.children[1].children[0].value.lower()
+                    try:
+                        idx = get_index_of_column_name(table_name, column_name, attribute_list)
+                    except TableNotSpecifiedError:
+                        # check SelectTableExistenceError(#tableName)
+                        print_error(f"Selection has failed: {table_name} does not exist")
+                        for (selectDB, table_name) in db_name_pair_list:
+                            selectDB.close()
+                        return
+                    except ColumnNotExistError:
+                        # check SelectColumnResolveError(#colName) - column not exist
+                        print_error(f"Selection has failed: fail to resolve {column_name}")
+                        for (selectDB, table_name) in db_name_pair_list:
+                            selectDB.close()
+                        return
+                    else:
+                        select_att_str_list.append(f"{table_name}.{column_name}")
+                        select_att_idx_list.append(idx)
+                else:
+                    # table_name is not clarified, there is a possibility to reference ambiguously
+                    column_name = select_column.children[1].children[0].value.lower()
+                    try:
+                        idx = get_index_of_column_name(None, column_name, attribute_list)
+                    except AmbiguousReferenceError:
+                        # check SelectColumnResolveError(#colName) - ambiguous reference
+                        print_error(f"Selection has failed: fail to resolve {column_name}")
+                        for (selectDB, table_name) in db_name_pair_list:
+                            selectDB.close()
+                        return
+                    except ColumnNotExistError:
+                        # check SelectColumnResolveError(#colName) - column not exist
+                        print_error(f"Selection has failed: fail to resolve {column_name}")
+                        for (selectDB, table_name) in db_name_pair_list:
+                            selectDB.close()
+                        return
+                    else:
+                        select_att_str_list.append(f"{column_name}")
+                        select_att_idx_list.append(idx)
+
+        # header will be printed once
+        # if the error occurs during the analysis of where_clause, do not header_print
+        header_print : bool = False
+
+        where_clause = items[2].children[1]
+        for data in data_list:
+            if where_clause is None:
+                # print all data
+                if not header_print:
+                    header_print = True
+                    print_header(select_att_str_list)
+
+                for idx in select_att_idx_list:
+                    if data[idx] is None:
+                        print(f"|{'null'.ljust(15)}", end = '')
+                    else:
+                        print(f"|{str(data[idx]).ljust(15)}", end = '')
+                print('|')
+            else:
+                # get where_clause_value
+                try:
+                    where_clause_value = get_where_clause_value(where_clause, attribute_list, data)
+                except AmbiguousReferenceError:
+                    print_error("Where clause contains ambiguous reference")
+                    for (selectDB, table_name) in db_name_pair_list:
+                        selectDB.close()
+                    return
+                except TableNotSpecifiedError:
+                    print_error("Where clause trying to reference tables which are not specified")
+                    for (selectDB, table_name) in db_name_pair_list:
+                        selectDB.close()
+                    return
+                except ColumnNotExistError:
+                    print_error("Where clause trying to reference non existing column")
+                    for (selectDB, table_name) in db_name_pair_list:
+                        selectDB.close()
+                    return
+                except IncomparableError:
+                    print_error("Where clause trying to compare incomparable values")
+                    for (selectDB, table_name) in db_name_pair_list:
+                        selectDB.close()
+                    return
+                else:
+                    if where_clause_value:
+                        if not header_print:
+                            header_print = True
+                            print_header(select_att_str_list)
+
+                        # this data is to be printed
+                        for idx in select_att_idx_list:
+                            if data[idx] is None:
+                                print(f"|{'null'.ljust(15)}", end = '')
+                            else:
+                                print(f"|{str(data[idx]).ljust(15)}", end = '')
+                        print('|')
+        
+        if header_print:
+            # successfully printed all data
+            # print_footer
+            print_footer(select_att_str_list)
+        else:
+            # there is no data to be printed
+            # only print_header in this case
+            print_header(select_att_str_list)
+
+        # close selectDB
+        for (selectDB, table_name) in db_name_pair_list:
+            selectDB.close()
         
     def insert_query(self, items):
         table_name = items[2].children[0].lower()
@@ -645,29 +1047,98 @@ class MyTransformer(Transformer):
         insertDB = db.DB()
         insertDB.open(f'DB/{table_name}.db', dbtype=db.DB_HASH)
         attributes = Attribute.decode_att_list(insertDB.get(encode("_attribute_list")))
-        
+        attributes_name_list = [attribute.column_name for attribute in attributes]
+
         insert_value_list = []
         insert_value_iter = items[5].find_data("insert_value")
         for insert_value in insert_value_iter:
-            insert_value_list.append(insert_value.children[0].value)
+            insert_value_list.append((insert_value.children[0].type, insert_value.children[0].value))
 
-        data_list = []
+        if items[3] is None:
+            column_index_list = list(range(len(attributes)))
+            
+            # check InsertTypeMismatchError when columns are not declared
+            if len(column_index_list) != len(insert_value_list):
+                print_error("Insertion has failed: Types are not matched")
+                insertDB.close()
+                return
+            column_checked_list = [True] * len(attributes)
+        else:
+            column_index_list = []
+            column_checked_list = [False] * len(attributes)
+            column_name_iter = items[3].find_data("column_name")
+            column_name_list = []
+
+            for column_name in column_name_iter:
+                column_name_list.append(column_name.children[0].value)
+
+            # check InsertTypeMismatchError when columns are declared
+            if len(column_name_list) != len(insert_value_list):
+                print_error("Insertion has failed: Types are not matched")
+                insertDB.close()
+                return
+
+            for column_name in column_name_list:
+                
+                # check InsertColumnExistenceError(#colName)
+                if column_name not in attributes_name_list:
+                    print_error(f"Insertion has failed: '{column_name}' does not exist")
+                    insertDB.close()
+                    return
+                
+                for i in range(len(attributes_name_list)):
+                    if column_name == attributes_name_list[i]:
+                        column_index_list.append(i)
+                        column_checked_list[i] = True
+                        break
+
+        data_list = [None] * len(attributes)
 
         for i in range(len(attributes)):
-            if attributes[i].data_type == "int":
-                integer = int(insert_value_list[i])
-                data_list.append(integer)
-            elif attributes[i].data_type == "char":
-                # get _STRING_ESC_INNER
-                string_inner = insert_value_list[i][1:-1]
-                # if data_type is char, get the char_length
-                char_length = int(attributes[i].char_length)
-                string_trunc = string_inner[:char_length]
-                # trunc the string to char_length
-                data_list.append(string_trunc)
-            elif attributes[i].data_type == "date":
-                date_data = date(insert_value_list[i])
-                data_list.append(date_data)
+            # column is not declared (i.e. null)
+            if column_checked_list[i] is False:
+                # check InsertColumnNonNullableError(#colName)
+                if attributes[i].not_null:
+                    print_error(f"Insertion has failed: '{attributes[i].column_name}' is not nullable")
+                    insertDB.close()
+                    return
+                else:
+                    data_list[i] = None
+                    continue
+        
+        for i in range(len(insert_value_list)):
+            (insert_type, insert_value) = insert_value_list[i]
+            column_index = column_index_list[i]
+            if insert_type == "INT":
+                if attributes[column_index].data_type == "int":
+                    data_list[column_index] = int(insert_value)
+                else:
+                    print_error("Insertion has failed: Types are not matched")
+                    insertDB.close()
+                    return
+            elif insert_type == "STR":
+                if attributes[column_index].data_type == "char":
+                    # trim first and last character \"
+                    string_inner = insert_value[1:-1]
+                    # if data_type is char, get the char_length
+                    string_trunc = string_inner[:attributes[column_index].char_length]
+                    data_list[column_index] = string_trunc
+                else:
+                    print_error("Insertion has failed: Types are not matched")
+                    insertDB.close()
+                    return
+            elif insert_type == "DATE":
+                if attributes[column_index].data_type == "date":
+                    data_list[column_index] = date(insert_value)
+            elif insert_type == "NULL":
+                # check InsertColumnNonNullableError(#colName)
+                if attributes[column_index].not_null:
+                    print_error(f"Insertion has failed: '{attributes[column_index].column_name}' is not nullable")
+                    return
+                else:
+                    data_list[column_index] = None
+            else:
+                print_error("WTF")
 
         static_count = insertDB.get(encode("_static_count"))
         # use current static_count as a key
@@ -677,9 +1148,89 @@ class MyTransformer(Transformer):
         
         # print InsertResult
         print_success('The row is inserted')
+        insertDB.close()
 
     def delete_query(self, items):
-        print_error('Delete query not implemented')
+
+        # do not show values whose key is reserved for internal evaluation
+        reserved_key = ["_attribute_list", "_static_count"]
+        
+        table_name = items[2].children[0].value
+        key = encode(table_name)
+
+        # check NoSuchTable
+        if not infoDB.exists(key):
+            print_error("No such table")
+            return
+
+        delete_key_list = []
+        att_list = []
+
+        deleteDB = db.DB()
+        deleteDB.open(f"DB/{table_name}.db", dbtype=db.DB_HASH)
+        attributes = Attribute.decode_att_list(deleteDB.get(encode("_attribute_list")))
+        for attribute in attributes:
+            att_list.append((table_name, attribute))
+        cursor = deleteDB.cursor()
+
+        where_clause = items[3]
+        if where_clause is None: # delete all
+            count = 0
+            while x := cursor.next():
+                key = decode(x[0])
+                if key not in reserved_key:
+                    count = count + 1
+                    cursor.delete()
+
+            # print DeleteResult(#count)
+            print_success(f"{count} row(s) are deleted")
+            deleteDB.close()
+            return
+        else:
+            # if there is a where_clause, first iterate all data to assert where_clause is valid
+            count = 0
+            while x := cursor.next():
+                key = decode(x[0])
+                if key in reserved_key:
+                    continue
+                data = Data.decode_data_to_att_list(x[1], attributes)
+                
+                try:
+                    where_clause_value = get_where_clause_value(where_clause, att_list, data)
+                except AmbiguousReferenceError:
+                    print_error("Where clause contains ambiguous reference")
+                    deleteDB.close()
+                    return
+                except TableNotSpecifiedError:
+                    print_error("Where clause trying to reference tables which are not specified")
+                    deleteDB.close()
+                    return
+                except ColumnNotExistError:
+                    print_error("Where clause trying to reference non existing column")
+                    deleteDB.close()
+                    return
+                except IncomparableError:
+                    print_error("Where clause trying to compare incomparable values")
+                    deleteDB.close()
+                    return
+                else:    
+                    if where_clause_value:
+                        delete_key_list.append(key)
+        
+        cursor = deleteDB.cursor()
+        count = 0
+
+        # if where_clause is valid, delete data in delete_key_list
+        while x := cursor.next():
+            key = decode(x[0])
+            if key in delete_key_list:
+                cursor.delete()
+                count = count + 1
+        
+        # print DeleteResult(#count)
+        print_success(f"{count} row(s) are deleted")
+        deleteDB.close()
+
     def update_tables_query(self, items):
         print_error('Update tables query not implemented')
     def exit(self, items):
@@ -710,7 +1261,7 @@ while (True):
             output = sql_parser.parse(query + ';')
             MyTransformer().transform(output)
         except LarkError as e:
-            # traceback.print_exc()
+            traceback.print_exc()
 
             # if parsing error occurs, break the for loop and continue the while loop
             # breaking the for loop means ignoring the remaining queries

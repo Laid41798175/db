@@ -137,7 +137,7 @@ null_operation : IS [NOT] NULL
 
 // INSERT
 insert_query : INSERT INTO table_name [column_name_list] VALUES insert_value_expression
-insert_value : INT | STR | DATE
+insert_value : INT | STR | DATE | NULL
 insert_value_list : insert_value ("," insert_value)*
 insert_value_expression : LP insert_value_list RP
 
