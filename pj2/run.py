@@ -1,19 +1,151 @@
 import pymysql
+import pandas
+
+connection = pymysql.connect(
+    host = 'astronaut.snu.ac.kr',
+    port = 7000,
+    user = 'DB2018_19857',
+    password = 'DB2018_19857',
+    db = 'DB2018_19857',
+    charset = 'utf8'
+)
+
+cursor = connection.cursor()
+
+def create_tables():
+    create_movie_table_query = '''
+        CREATE TABLE movie (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            title VARCHAR(255) UNIQUE,
+            director VARCHAR(255),
+            price INT CHECK (price BETWEEN 0 AND 100000)
+        )
+    '''
+    cursor.execute(create_movie_table_query)
+
+    create_customer_table_query = '''
+        CREATE TABLE customer (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            name VARCHAR(255),
+            age INT CHECK (age BETWEEN 12 AND 110),
+            class VARCHAR(7) CHECK (class IN ('Basic', 'Premium', 'Vip')),
+            UNIQUE (name, age)
+        )
+    '''
+    cursor.execute(create_customer_table_query)
+
+    create_booking_table_query = '''
+        CREATE TABLE booking (
+            movie_id INT,
+            customer_id INT,
+            PRIMARY KEY (movie_id, customer_id),
+            FOREIGN KEY (movie_id) REFERENCES movie(id) ON DELETE CASCADE,
+            FOREIGN KEY (customer_id) REFERENCES customer(id) ON DELETE CASCADE
+        )
+    '''
+    cursor.execute(create_booking_table_query)
+
+    create_review_table_query = '''
+        CREATE TABLE review (
+            movie_id INT,
+            customer_id INT,
+            rating INT CHECK (rating BETWEEN 1 AND 5),
+            PRIMARY KEY (movie_id, customer_id),
+            FOREIGN KEY (movie_id) REFERENCES movie(id) ON DELETE CASCADE,
+            FOREIGN KEY (customer_id) REFERENCES customer(id) ON DELETE CASCADE
+        )
+    '''
+    cursor.execute(create_review_table_query)
+
+def tables_exist() -> bool :
+    show_query = "SHOW TABLES"
+    cursor.execute(show_query)
+    tables = cursor.fetchall()
+    return len(tables) > 0
+
+def put_movie(title : str, director : str, price : int) -> int :
+    movie_id = get_movie_id(title)
+    if movie_id == -1:
+        movie_query = f'''INSERT INTO movie (title, director, price) VALUES("{title}", "{director}", {price})'''
+        cursor.execute(movie_query)
+        movie_id = cursor.lastrowid
+    return movie_id
+
+def put_customer(name : str, age : int, class_t : int) -> int :
+    customer_id = get_customer_id(name, age)
+    if customer_id == -1:
+        customer_query = f'''INSERT INTO customer (name, age, class) VALUES("{name}", {age}, "{class_t}")'''
+        cursor.execute(customer_query)
+        customer_id = cursor.lastrowid
+    return customer_id
+
+def get_movie_id(title : str) -> int :
+    select_query = f'''SELECT id FROM movie WHERE title = "{title}"'''
+    cursor.execute(select_query)
+    result = cursor.fetchall()
+    if len(result) == 0:
+        return -1
+    else:
+        return result[0]
+
+def get_customer_id(name : str, age : int) -> int :
+    select_query = f'''SELECT id FROM customer WHERE name = "{name}" AND age = {age}'''
+    cursor.execute(select_query)
+    result = cursor.fetchall()
+    if len(result) == 0:
+        return -1
+    else:
+        return result[0]
+
+# TODO
+def read_data_csv():
+    # read csv with one header line
+    df = pandas.read_csv('data.csv', header=0)
+    for line in df.values.tolist():
+        title : str = line[0]
+        director : str = line[1]
+        price : int = int(line[2])
+        name : str = line[3]
+        age : int = int(line[4])
+        class_t : str = line[5]
+
+        movie_id : int = put_movie(title, director, price)
+        customer_id : int = put_customer(name, age, class_t)
 
 # Problem 1 (5 pt.)
-def initialize_database():
-    # YOUR CODE GOES HERE
+def initialize_database():    
+    if not tables_exist():
+        create_tables()
 
+    read_data_csv()
+
+    # success message
     print('Database successfully initialized')
-    # YOUR CODE GOES HERE
-    pass
+
+def delete_table(table : str):
+    delete_query = f"DELETE FROM {table}"
+    cursor.execute(delete_query)
+
+def drop_table(table : str):
+    drop_query = f"DROP TABLE {table}"
+    cursor.execute(drop_query)
 
 # Problem 15 (5 pt.)
-def reset():
-    # YOUR CODE GOES HERE
+def reset(check : bool):
+    if check:
+        reset = str(input('Do you want to reset the database? (y/n): '))
+        if reset != 'y':
+            return
 
-    # YOUR CODE GOES HERE
-    pass
+    if tables_exist():
+        # reset the database
+        drop_table("booking")
+        drop_table("review")
+        drop_table("movie")
+        drop_table("customer")
+
+    print('Database successfully reset')
+    initialize_database()
 
 # Problem 2 (4 pt.)
 def print_movies():
@@ -25,71 +157,114 @@ def print_movies():
 
 # Problem 3 (3 pt.)
 def print_users():
-    # YOUR CODE GOES HERE
-
-    
-    # YOUR CODE GOES HERE
-    pass
+    select_query = "SELECT * FROM customer"
+    cursor.execute(select_query)
+    records = cursor.fetchall()
+    print("--------------------------------------------------------------------------------")
+    print("id".ljust(10) + "name".ljust(30) + "age".ljust(15) + "class")
+    print("--------------------------------------------------------------------------------")
+    for record in records:
+        id : int = record[0]
+        name : str = record[1]
+        age : int = record[2]
+        class_t : str = record[3]
+        print(str(id).ljust(10) + name.ljust(30) + str(age).ljust(15) + class_t)
+    print("--------------------------------------------------------------------------------")
 
 # Problem 4 (4 pt.)
 def insert_movie():
     # YOUR CODE GOES HERE
     title = input('Movie title: ')
     director = input('Movie director: ')
-    
-    # error message
-    print(f'Movie {title} already exists')
-    print('Movie price should be from 0 to 100000')
+    price = int(input('Movie price: '))
+
+    price_constraint = 0 <= price and price <= 100000
+    if not price_constraint:
+        print("Movie price should be from 0 to 100000")
+        return
+
+    movie_id = get_movie_id(title)
+    if movie_id != -1:
+        print(f"The movie {title} already exists")
+
+    put_movie(title, director, price)
 
     # success message
     print('One movie successfully inserted')
-    # YOUR CODE GOES HERE
-    pass
 
 # Problem 6 (4 pt.)
 def remove_movie():
     # YOUR CODE GOES HERE
     movie_id = input('Movie ID: ')
-
-
-    # error message
-    print(f'Movie {movie_id} does not exist')
-
-    # success message
-    print('One movie successfully removed')
-    # YOUR CODE GOES HERE
-    pass
+    
+    delete_query = f"DELETE FROM movie WHERE id = {movie_id}"
+    deleted_row = cursor.execute(delete_query)
+    if deleted_row == 0:
+        # error message
+        print(f'Movie {movie_id} does not exist')
+    else:
+        # success message
+        print('One movie successfully removed')
 
 # Problem 5 (4 pt.)
 def insert_user():
     # YOUR CODE GOES HERE
     name = input('User name: ')
     age = input('User age: ')
-    
+    class_t = input('User class: ')
 
-    # error message
-    print('User age should be from 12 to 110')
-    print(f'The user ({name}, {age}) already exists')
-    print('User class should be basic, premium or vip')
+    age_constraint = 12 <= age and age <= 110
+    class_constraint = class_t in ["basic", "premium", "vip"]
+
+    if (not age_constraint) and class_constraint:
+        print("User age should be from 12 to 110")
+        return
+    elif age_constraint and (not class_constraint):
+        print("User class should basic, premium or vip")
+        return
+    elif (not age_constraint) and (not class_constraint):
+        print("User age should be from 12 to 110, User class should basic, premium or vip")
+        return
+    else: # age_constraint and class_constraint
+        pass
+
+    customer_id = get_customer_id(name, age)
+    if customer_id != -1:
+        print(f'The user ({name}, {age}) already exists')
+        return
+    
+    put_customer(name, age, class_t)
     
     # success message
     print('One user successfully inserted')
-    # YOUR CODE GOES HERE
-    pass
 
 # Problem 7 (4 pt.)
 def remove_user():
     # YOUR CODE GOES HERE
     user_id = input('User ID: ')
 
+    delete_query = f"DELETE FROM customer WHERE id = {user_id}"
+    deleted_row = cursor.execute(delete_query)
+    if deleted_row == 0:
+        # error message
+        print(f'User {user_id} does not exist')
+    else:
+        # success message
+        print('One user successfully removed')
 
-    # error message
-    print(f'User {user_id} does not exist')
+def movie_exists(movie_id : int) -> bool :
+    select_query = f"SELECT * FROM movie WHERE id = {movie_id}"
+    cursor.execute(select_query)
+    result = cursor.fetchall()
+    return len(result) > 0
 
-    # success message
-    print('One user successfully removed')
-    # YOUR CODE GOES HERE
-    pass
+def customer_exists(user_id : int) -> bool :
+    select_query = f"SELECT * FROM movie WHERE id = {user_id}"
+    cursor.execute(select_query)
+    result = cursor.fetchall()
+    return len(result) > 0
+
+
 
 # Problem 8 (5 pt.)
 def book_movie():
@@ -97,6 +272,7 @@ def book_movie():
     movie_id = input('Movie ID: ')
     user_id = input('User ID: ')
 
+    
 
     # error message
     print(f'Movie {movie_id} does not exist')
@@ -176,11 +352,18 @@ def recommend_item_based():
     # YOUR CODE GOES HERE
     pass
 
+def sql():
+    query = input("sql: ")
+    cursor.execute(query)
+    result = cursor.fetchall()
+    for row in result:
+        print(row)
 
 # Total of 70 pt.
 def main():
+
     # initialize database
-    reset()
+    reset(False)
 
     while True:
         print('============================================================')
@@ -232,7 +415,9 @@ def main():
             print('Bye!')
             break
         elif menu == 15:
-            reset()
+            reset(True)
+        elif menu == 16:
+            sql()
         else:
             print('Invalid action')
 
