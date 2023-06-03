@@ -13,18 +13,18 @@ connection = pymysql.connect(
 cursor = connection.cursor()
 
 def create_tables():
-    create_movie_table_query = '''
-        CREATE TABLE movie (
+    create_movies_table_query = '''
+        CREATE TABLE movies (
             id INT PRIMARY KEY AUTO_INCREMENT,
             title VARCHAR(255) UNIQUE,
             director VARCHAR(255),
             price INT CHECK (price BETWEEN 0 AND 100000)
         )
     '''
-    cursor.execute(create_movie_table_query)
+    cursor.execute(create_movies_table_query)
 
-    create_customer_table_query = '''
-        CREATE TABLE customer (
+    create_customers_table_query = '''
+        CREATE TABLE customers (
             id INT PRIMARY KEY AUTO_INCREMENT,
             name VARCHAR(255),
             age INT CHECK (age BETWEEN 12 AND 110),
@@ -32,30 +32,30 @@ def create_tables():
             UNIQUE (name, age)
         )
     '''
-    cursor.execute(create_customer_table_query)
+    cursor.execute(create_customers_table_query)
 
-    create_booking_table_query = '''
-        CREATE TABLE booking (
+    create_bookings_table_query = '''
+        CREATE TABLE bookings (
             movie_id INT,
             customer_id INT,
             PRIMARY KEY (movie_id, customer_id),
-            FOREIGN KEY (movie_id) REFERENCES movie(id) ON DELETE CASCADE,
-            FOREIGN KEY (customer_id) REFERENCES customer(id) ON DELETE CASCADE
+            FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+            FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
         )
     '''
-    cursor.execute(create_booking_table_query)
+    cursor.execute(create_bookings_table_query)
 
-    create_review_table_query = '''
-        CREATE TABLE review (
+    create_ratings_table_query = '''
+        CREATE TABLE ratings (
             movie_id INT,
             customer_id INT,
             rating INT CHECK (rating BETWEEN 1 AND 5),
             PRIMARY KEY (movie_id, customer_id),
-            FOREIGN KEY (movie_id) REFERENCES movie(id) ON DELETE CASCADE,
-            FOREIGN KEY (customer_id) REFERENCES customer(id) ON DELETE CASCADE
+            FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE,
+            FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
         )
     '''
-    cursor.execute(create_review_table_query)
+    cursor.execute(create_ratings_table_query)
 
 def tables_exist() -> bool :
     show_query = "SHOW TABLES"
@@ -66,38 +66,41 @@ def tables_exist() -> bool :
 def put_movie(title : str, director : str, price : int) -> int :
     movie_id = get_movie_id(title)
     if movie_id == -1:
-        movie_query = f'''INSERT INTO movie (title, director, price) VALUES("{title}", "{director}", {price})'''
-        cursor.execute(movie_query)
+        insert_query = f'''INSERT INTO movies (title, director, price) VALUES("{title}", "{director}", {price})'''
+        cursor.execute(insert_query)
         movie_id = cursor.lastrowid
     return movie_id
 
 def put_customer(name : str, age : int, class_t : int) -> int :
     customer_id = get_customer_id(name, age)
     if customer_id == -1:
-        customer_query = f'''INSERT INTO customer (name, age, class) VALUES("{name}", {age}, "{class_t}")'''
-        cursor.execute(customer_query)
+        insert_query = f'''INSERT INTO customers (name, age, class) VALUES("{name}", {age}, "{class_t}")'''
+        cursor.execute(insert_query)
         customer_id = cursor.lastrowid
     return customer_id
 
 def get_movie_id(title : str) -> int :
-    select_query = f'''SELECT id FROM movie WHERE title = "{title}"'''
+    select_query = f'''SELECT id
+                    FROM movies
+                    WHERE title = "{title}"'''
     cursor.execute(select_query)
     result = cursor.fetchall()
     if len(result) == 0:
         return -1
     else:
-        return result[0]
+        return result[0][0]
 
 def get_customer_id(name : str, age : int) -> int :
-    select_query = f'''SELECT id FROM customer WHERE name = "{name}" AND age = {age}'''
+    select_query = f'''SELECT id
+                    FROM customers
+                    WHERE name = "{name}" AND age = {age}'''
     cursor.execute(select_query)
     result = cursor.fetchall()
     if len(result) == 0:
         return -1
     else:
-        return result[0]
+        return result[0][0]
 
-# TODO
 def read_data_csv():
     # read csv with one header line
     df = pandas.read_csv('data.csv', header=0)
@@ -111,6 +114,9 @@ def read_data_csv():
 
         movie_id : int = put_movie(title, director, price)
         customer_id : int = put_customer(name, age, class_t)
+
+        insert_query = f'''INSERT INTO bookings VALUES({movie_id}, {customer_id})'''
+        cursor.execute(insert_query)
 
 # Problem 1 (5 pt.)
 def initialize_database():    
@@ -139,25 +145,63 @@ def reset(check : bool):
 
     if tables_exist():
         # reset the database
-        drop_table("booking")
-        drop_table("review")
-        drop_table("movie")
-        drop_table("customer")
+        drop_table("bookings")
+        drop_table("ratings")
+        drop_table("movies")
+        drop_table("customers")
 
     print('Database successfully reset')
     initialize_database()
 
 # Problem 2 (4 pt.)
 def print_movies():
-    # YOUR CODE GOES HERE
-
-    
-    # YOUR CODE GOES HERE
-    pass
+    select_query = f'''SELECT id, title, director, price
+                    FROM movies'''
+    cursor.execute(select_query)
+    records = cursor.fetchall()
+    print("---------------------------------------------------------------------------------------------------------------------------------------------------")
+    print("id".ljust(10) + "title".ljust(70) + "director".ljust(35) + "price".ljust(8) + "avg. price".ljust(15) + "reservation".ljust(15) + "avg. rating")
+    print("---------------------------------------------------------------------------------------------------------------------------------------------------")
+    for record in records:
+        id : int = record[0]
+        title : str = record[1]
+        director : str = record[2]
+        price : int = record[3]
+        bookings_select_query = f'''SELECT DISTINCT class
+                                FROM customers JOIN bookings ON id = customer_id
+                                WHERE movie_id = {id}'''
+        cursor.execute(bookings_select_query)
+        bookings_records = cursor.fetchall()
+        reservation : int = len(bookings_records)
+        sum : int = 0
+        for bookings_record in bookings_records:
+            class_t : str = bookings_record[0]
+            if class_t == "basic":
+                sum += price
+            elif class_t == "premium":
+                sum += int(price * 0.75)
+            elif class_t == "vip":
+                sum += int(price * 0.5)
+        if reservation == 0:
+            average_price = None
+        else:
+            average_price = int(sum / reservation)
+        ratings_select_query = f'''SELECT avg(rating)
+                                FROM ratings
+                                WHERE movie_id = {id}'''
+        cursor.execute(ratings_select_query)
+        ratings_record = cursor.fetchall()
+        if ratings_record is None:
+            average_rating = None
+        else:
+            average_rating = ratings_record[0][0]
+        print(str(id).ljust(10) + title.ljust(70) + director.ljust(35) + str(price).ljust(8) + str(average_price).ljust(15) + str(reservation).ljust(15) + str(average_rating))
+    print("---------------------------------------------------------------------------------------------------------------------------------------------------")
 
 # Problem 3 (3 pt.)
 def print_users():
-    select_query = "SELECT * FROM customer"
+    select_query = f'''SELECT *
+                    FROM customers'''
     cursor.execute(select_query)
     records = cursor.fetchall()
     print("--------------------------------------------------------------------------------")
@@ -173,7 +217,6 @@ def print_users():
 
 # Problem 4 (4 pt.)
 def insert_movie():
-    # YOUR CODE GOES HERE
     title = input('Movie title: ')
     director = input('Movie director: ')
     price = int(input('Movie price: '))
@@ -194,10 +237,9 @@ def insert_movie():
 
 # Problem 6 (4 pt.)
 def remove_movie():
-    # YOUR CODE GOES HERE
-    movie_id = input('Movie ID: ')
+    movie_id = int(input('Movie ID: '))
     
-    delete_query = f"DELETE FROM movie WHERE id = {movie_id}"
+    delete_query = f"DELETE FROM movies WHERE id = {movie_id}"
     deleted_row = cursor.execute(delete_query)
     if deleted_row == 0:
         # error message
@@ -208,25 +250,19 @@ def remove_movie():
 
 # Problem 5 (4 pt.)
 def insert_user():
-    # YOUR CODE GOES HERE
     name = input('User name: ')
-    age = input('User age: ')
+    age = int(input('User age: '))
     class_t = input('User class: ')
 
     age_constraint = 12 <= age and age <= 110
     class_constraint = class_t in ["basic", "premium", "vip"]
 
-    if (not age_constraint) and class_constraint:
+    if not age_constraint:
         print("User age should be from 12 to 110")
         return
-    elif age_constraint and (not class_constraint):
+    if not class_constraint:
         print("User class should basic, premium or vip")
         return
-    elif (not age_constraint) and (not class_constraint):
-        print("User age should be from 12 to 110, User class should basic, premium or vip")
-        return
-    else: # age_constraint and class_constraint
-        pass
 
     customer_id = get_customer_id(name, age)
     if customer_id != -1:
@@ -240,10 +276,9 @@ def insert_user():
 
 # Problem 7 (4 pt.)
 def remove_user():
-    # YOUR CODE GOES HERE
     user_id = input('User ID: ')
 
-    delete_query = f"DELETE FROM customer WHERE id = {user_id}"
+    delete_query = f"DELETE FROM customers WHERE id = {user_id}"
     deleted_row = cursor.execute(delete_query)
     if deleted_row == 0:
         # error message
@@ -253,80 +288,170 @@ def remove_user():
         print('One user successfully removed')
 
 def movie_exists(movie_id : int) -> bool :
-    select_query = f"SELECT * FROM movie WHERE id = {movie_id}"
+    select_query = f'''SELECT *
+                    FROM movies
+                    WHERE id = {movie_id}'''
     cursor.execute(select_query)
     result = cursor.fetchall()
     return len(result) > 0
 
-def customer_exists(user_id : int) -> bool :
-    select_query = f"SELECT * FROM movie WHERE id = {user_id}"
+def customer_exists(customer_id : int) -> bool :
+    select_query = f'''SELECT *
+                    FROM customers
+                    WHERE id = {customer_id}'''
     cursor.execute(select_query)
     result = cursor.fetchall()
     return len(result) > 0
 
+def booking_exists(movie_id : int, customer_id : int) -> bool:
+    select_query = f'''SELECT *
+                    FROM bookings
+                    WHERE movie_id = {movie_id} AND customer_id = {customer_id}'''
+    cursor.execute(select_query)
+    result = cursor.fetchall()
+    return len(result) > 0
 
+def rating_exists(movie_id : int, customer_id : int) -> bool:
+    select_query = f'''SELECT *
+                    FROM ratings
+                    WHERE movie_id = {movie_id} AND customer_id = {customer_id}'''
+    cursor.execute(select_query)
+    result = cursor.fetchall()
+    return len(result) > 0
+
+def is_movie_fully_booked(movie_id : int) -> bool:
+    select_query = f'''SELECT *
+                    FROM bookings
+                    WHERE movie_id = {movie_id}'''
+    cursor.execute(select_query)
+    records = cursor.fetchall()
+    return len(records) >= 10
 
 # Problem 8 (5 pt.)
 def book_movie():
-    # YOUR CODE GOES HERE
-    movie_id = input('Movie ID: ')
-    user_id = input('User ID: ')
+    movie_id = int(input('Movie ID: '))
+    user_id = int(input('User ID: '))
 
-    
+    if not movie_exists(movie_id):
+        print(f'Movie {movie_id} does not exist')
+        return
+    if not customer_exists(user_id):
+        print(f'User {user_id} does not exist')
+        return
+    if booking_exists(movie_id, user_id):
+        print(f'User {user_id} already booked movie {movie_id}')
+        return
+    if is_movie_fully_booked(movie_id):
+        print(f'Movie {movie_id} has already been fully booked')
+        return
 
-    # error message
-    print(f'Movie {movie_id} does not exist')
-    print(f'User {user_id} does not exist')
-    print(f'User {user_id} already booked movie {movie_id}')
-    print(f'Movie {movie_id} has already been fully booked')
+    insert_query = f"INSERT INTO bookings VALUES({movie_id}, {user_id})"
+    cursor.execute(insert_query)
 
     # success message
     print('Movie successfully booked')
-    # YOUR CODE GOES HERE
-    pass
 
 # Problem 9 (5 pt.)
 def rate_movie():
-    # YOUR CODE GOES HERE
-    movie_id = input('Movie ID: ')
-    user_id = input('User ID: ')
-    rating = input('Ratings (1~5): ')
+    movie_id = int(input('Movie ID: '))
+    user_id = int(input('User ID: '))
+    rating = int(input('Ratings (1~5): '))
 
+    rating_constraint = 1 <= rating and rating <= 5
 
-    # error message
-    print(f'Movie {movie_id} does not exist')
-    print(f'User {user_id} does not exist')
-    print(f'Wrong value for a rating')
-    print(f'User {user_id} has not booked movie {movie_id} yet')
-    print(f'User {user_id} has already rated movie {movie_id}')
+    if not movie_exists(movie_id):
+        print(f'Movie {movie_id} does not exist')
+        return
+    if not customer_exists(user_id):
+        print(f'User {user_id} does not exist')
+        return
+    if not rating_constraint:
+        print(f'Wrong value for a rating')
+        return
+    if not booking_exists(movie_id, user_id):
+        print(f'User {user_id} has not booked movie {movie_id} yet')
+        return        
+    if rating_exists(movie_id, user_id):
+        print(f'User {user_id} has already rated movie {movie_id}')
+        return
+    
+    insert_query = f"INSERT INTO ratings VALUES({movie_id}, {user_id}, {rating})"
+    cursor.execute(insert_query)
 
     # success message
     print('Movie successfully rated')
-    # YOUR CODE GOES HERE
-    pass
 
 # Problem 10 (5 pt.)
 def print_users_for_movie():
-    # YOUR CODE GOES HERE
-    user_id = input('User ID: ')
-
+    movie_id = int(input('Movie ID: '))
     
-    # error message
-    print(f'User {user_id} does not exist')
-    # YOUR CODE GOES HERE
-    pass
-
+    if not movie_exists(movie_id):
+        print(f'Movie {movie_id} does not exist')
+        return
+    
+    select_query = f'''SELECT price
+                    FROM movies
+                    WHERE id = {movie_id}'''
+    cursor.execute(select_query)
+    result = cursor.fetchall()
+    price : int = result[0][0]
+    
+    select_query = f'''SELECT id, name, age, class, rating
+                    FROM customers LEFT JOIN bookings ON id = customer_id NATURAL LEFT JOIN ratings
+                    WHERE movie_id = {movie_id}'''
+    cursor.execute(select_query)
+    records = cursor.fetchall()
+    print("--------------------------------------------------------------------------------------------------------")
+    print("id".ljust(10) + "name".ljust(30) + "age".ljust(10) + "res. price".ljust(15) + "rating")
+    print("--------------------------------------------------------------------------------------------------------")
+    for record in records:
+        id : int = record[0]
+        name : str = record[1]
+        age : int = record[2]
+        class_t : str = record[3]
+        rating : int = record[4]
+        if class_t == "basic":
+            reserve_price = price
+        elif class_t == "premium":
+            reserve_price = int(price * 0.75)
+        elif class_t == "vip":
+            reserve_price = int(price * 0.5)
+        print(str(id).ljust(10) + name.ljust(30) + str(age).ljust(10) + str(reserve_price).ljust(15) + str(rating))
+    print("--------------------------------------------------------------------------------------------------------")
 
 # Problem 11 (5 pt.)
 def print_movies_for_user():
-    # YOUR CODE GOES HERE
-    user_id = input('User ID: ')
+    user_id = int(input('User ID: '))
 
+    if not customer_exists(user_id):
+        print(f'User {user_id} does not exist')
+        return
 
-    # error message
-    print(f'User {user_id} does not exist')
-    # YOUR CODE GOES HERE
-    pass
+    select_query = f"SELECT class FROM customers WHERE id = {user_id}"
+    cursor.execute(select_query)
+    results = cursor.fetchall()
+    class_t = results[0][0]
+
+    select_query = f"SELECT id, title, director, price, rating FROM movies LEFT JOIN bookings ON id = movie_id NATURAL LEFT JOIN ratings WHERE customer_id = {user_id}"
+    cursor.execute(select_query)
+    records = cursor.fetchall()
+    print("------------------------------------------------------------------------------------------------------------------------------------------------------------")
+    print("id".ljust(10) + "title".ljust(70) + "director".ljust(35) + "res. price".ljust(15) + "rating")
+    print("------------------------------------------------------------------------------------------------------------------------------------------------------------")
+    for record in records:
+        id : int = record[0]
+        title : str = record[1]
+        director : str = record[2]
+        price : int = record[3]
+        rating : int = record[4]
+        if class_t == "basic":
+            reserve_price = price
+        elif class_t == "premium":
+            reserve_price = int(price * 0.75)
+        elif class_t == "vip":
+            reserve_price = int(price * 0.5)
+        print(str(id).ljust(10) + title.ljust(70) + director.ljust(35) + str(reserve_price).ljust(15) + str(rating))
+    print("------------------------------------------------------------------------------------------------------------------------------------------------------------")
 
 # Problem 12 (6 pt.)
 def recommend_popularity():
