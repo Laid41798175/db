@@ -261,7 +261,7 @@ def insert_user():
         print("User age should be from 12 to 110")
         return
     if not class_constraint:
-        print("User class should basic, premium or vip")
+        print("User class should be basic, premium or vip")
         return
 
     customer_id = get_customer_id(name, age)
@@ -432,7 +432,9 @@ def print_movies_for_user():
     results = cursor.fetchall()
     class_t = results[0][0]
 
-    select_query = f"SELECT id, title, director, price, rating FROM movies LEFT JOIN bookings ON id = movie_id NATURAL LEFT JOIN ratings WHERE customer_id = {user_id}"
+    select_query = f'''SELECT id, title, director, price, rating
+                    FROM movies LEFT JOIN bookings ON id = movie_id NATURAL LEFT JOIN ratings
+                    WHERE customer_id = {user_id}'''
     cursor.execute(select_query)
     records = cursor.fetchall()
     print("------------------------------------------------------------------------------------------------------------------------------------------------------------")
@@ -456,14 +458,105 @@ def print_movies_for_user():
 # Problem 12 (6 pt.)
 def recommend_popularity():
     # YOUR CODE GOES HERE
-    user_id = input('User ID: ')
+    user_id = int(input('User ID: '))
 
+    if not customer_exists(user_id):
+        # error message
+        print(f'User {user_id} does not exist')
+        return
+    
+    customer_query = f'''SELECT class
+                    FROM customers
+                    WHERE id = {user_id}'''
+    cursor.execute(customer_query)
+    result = cursor.fetchall()
+    class_t : str = result[0][0]
 
-    # error message
-    print(f'User {user_id} does not exist')
-    # YOUR CODE GOES HERE
-    pass
+    select_query = f'''SELECT id, title, price, avg(rating)
+                    FROM movies LEFT JOIN ratings ON id = movie_id
+                    GROUP BY id
+                    ORDER BY avg(rating) DESC, id'''
+    cursor.execute(select_query)
+    records = cursor.fetchall()
+    print("---------------------------------------------------------------------------------------------------------------------------------------")
+    print("Rating-based")
+    print("id".ljust(10) + "title".ljust(70) + "res. price".ljust(15) + "reservation".ljust(15) + "avg. rating")
+    print("---------------------------------------------------------------------------------------------------------------------------------------")
+    for record in records:
+        movie_id : int = record[0]
+        booking_query = f'''SELECT * FROM bookings
+                        WHERE movie_id = {movie_id} AND customer_id = {user_id}'''
+        cursor.execute(booking_query)
+        result = cursor.fetchall()
+        if len(result) == 0:
+            # recommend this movie
+            title : str = record[1]
+            price : int = record[2]
 
+            if class_t == "basic":
+                reserve_price = price
+            elif class_t == "premium":
+                reserve_price = int(price * 0.75)
+            elif class_t == "vip":
+                reserve_price = int(price * 0.5)
+
+            reservation_query = f'''SELECT * FROM bookings
+                                WHERE movie_id = {movie_id}'''
+            cursor.execute(reservation_query)
+            result = cursor.fetchall()
+            reservation : int = len(result)
+
+            average_rating : float | None = record[3]
+            
+            print(str(movie_id).ljust(10) + title.ljust(70) + str(reserve_price).ljust(15) + str(reservation).ljust(15) + str(average_rating))
+            break
+        else:
+            # User already booked the movie
+            continue
+    
+    select_query = f'''SELECT id, title, price, count(bookings.movie_id) AS reservation
+                    FROM movies LEFT JOIN bookings ON id = movie_id
+                    GROUP BY id, title, price
+                    ORDER BY reservation DESC, id'''
+    cursor.execute(select_query)
+    records = cursor.fetchall()
+    print("---------------------------------------------------------------------------------------------------------------------------------------")
+    print("Popularity-based")
+    print("id".ljust(10) + "title".ljust(70) + "res. price".ljust(15) + "reservation".ljust(15) + "avg. rating")
+    print("---------------------------------------------------------------------------------------------------------------------------------------")
+    for record in records:
+        movie_id : int = record[0]
+        booking_query = f'''SELECT * FROM bookings
+                        WHERE movie_id = {movie_id} AND customer_id = {user_id}'''
+        cursor.execute(booking_query)
+        result = cursor.fetchall()
+        if len(result) == 0:
+            # recommend this movie
+            title : str = record[1]
+            price : int = record[2]
+
+            if class_t == "basic":
+                reserve_price = price
+            elif class_t == "premium":
+                reserve_price = int(price * 0.75)
+            elif class_t == "vip":
+                reserve_price = int(price * 0.5)
+            
+            reservation : int = record[3]
+
+            rating_query = f'''SELECT avg(rating)
+                            FROM ratings
+                            WHERE movie_id = {movie_id}'''
+            cursor.execute(rating_query)
+            result = cursor.fetchall()
+            average_rating : float = result[0][0]
+
+            print(str(movie_id).ljust(10) + title.ljust(70) + str(reserve_price).ljust(15) + str(reservation).ljust(15) + str(average_rating))
+            break
+        else:
+            # User already booked the movie
+            continue
+    print("---------------------------------------------------------------------------------------------------------------------------------------")
 
 # Problem 13 (10 pt.)
 def recommend_item_based():
